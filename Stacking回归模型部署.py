@@ -6,11 +6,16 @@ Created on Fri Jun  6 16:49:14 2025
 """
 
 import streamlit as st
+import joblib
 import numpy as np
 import pandas as pd
-from PIL import Image
-import joblib
 import shap
+import matplotlib.pyplot as plt
+from matplotlib.font_manager import FontProperties
+
+# 设置matplotlib支持中文和负号，这里以微软雅黑为例
+plt.rcParams['font.sans-serif'] = ['Microsoft YaHei']
+plt.rcParams['axes.unicode_minus'] = False    # 正常显示负号
 
 # 加载模型
 model_path = "stacking_regressor_model.pkl"
@@ -18,81 +23,92 @@ stacking_regressor = joblib.load(model_path)
 
 # 设置页面配置和标题
 st.set_page_config(layout="wide", page_title="Stacking 模型预测与 SHAP 可视化", page_icon="📊")
-
 st.title("📊 Stacking 模型预测与 SHAP 可视化分析")
-st.write("""
-通过输入特征值进行模型预测，并结合 SHAP 分析结果，了解特征对模型预测的贡献。
-""")
+st.write("""通过输入特征值进行模型预测，并结合 SHAP 分析结果，了解特征对模型预测的贡献。""")
 
-# 左侧侧边栏输入区域
-st.sidebar.header("特征输入区域")
-st.sidebar.write("请输入特征值：")
+# 定义特征范围和类型
+feature_ranges = {
+    "Resilience": {"type": "numerical", "min": 6, "max": 36, "default": 18},
+    "Depression": {"type": "numerical", "min": 0, "max": 3, "default": 3},
+    "Anxiety": {"type": "numerical", "min": 0, "max": 3, "default": 3},
+    "Family_support": {"type": "numerical", "min": 0, "max": 10, "default": 5},
+    "Age": {"type": "numerical", "min": 21, "max": 63, "default": 21},
+    "Occupation": {"type": "categorical", "options": ["Full-time job", "Part-time job"]},
+    "Method_of_delivery": {"type": "categorical", "options": ["Vaginal delivery", "Cesarean section"]},
+    "Marital_status": {"type": "categorical", "options": ["Married", "Unmarried"]},
+    "Educational_degree": {"type": "categorical", "options": ["Associate degree or below", "Bachelor's degree or above"]},
+    "Average_monthly_household_income": {"type": "categorical", "options": ["Average monthly household income less than or equal to 5000 yuan", "Average monthly household income greater than 5000 yuan"]},
+    "Medical_insurance": {"type": "categorical", "options": ["No", "Yes"]},
+    "Mode_of_conception": {"type": "categorical", "options": ["Natural conception", "Assisted conception"]},
+    "Pregnancy_complications": {"type": "categorical", "options": ["Yes", "No"]},
+    "Breastfeeding": {"type": "categorical", "options": ["Yes", "No"]},
+    "Rooming_in": {"type": "categorical", "options": ["Yes", "No"]},
+    "Planned_pregnancy": {"type": "categorical", "options": ["Yes", "No"]},
+    "Intrapartum_pain": {"type": "numerical", "min": 0, "max": 10, "default": 5},
+    "Postpartum_pain": {"type": "numerical", "min": 0, "max": 10, "default": 5}
+}
 
-# 定义特征输入范围
-Resilience = st.sidebar.number_input("Resilience (范围: 6-36)", min_value=6, max_value=36, value=18)
-Depression = st.sidebar.number_input("Depression (范围: 0-3)", min_value=0, max_value=3, value=3)
-Anxiety = st.sidebar.number_input("Anxiety (范围: 0-3)", min_value=0, max_value=3, value=3)
-Family_support = st.sidebar.number_input("Family support (范围: 0-10)", min_value=0, max_value=10, value=5)
-Age = st.sidebar.number_input("Age (范围: 21-63)", min_value=21, max_value=63, value=21)  # 修正为 number_input
-Occupation = st.sidebar.selectbox("Occupation", options=["Full-time job", "Part-time job"])
-Method_of_delivery = st.sidebar.selectbox("Method of delivery", options=["Vaginal delivery", "Cesarean section"])
-Marital_status = st.sidebar.selectbox("Marital status", options=["Married", "Unmarried"])
-Educational_degree = st.sidebar.selectbox("Educational degree", options=["Associate degree or below", "Bachelor's degree or above"])
-Average_monthly_household_income = st.sidebar.selectbox("Average monthly household income", options=["Average monthly household income less than or equal to 5000 yuan", "Average monthly household income greater than 5000 yuan"])
-Medical_insurance = st.sidebar.selectbox("Medical_insurance", options=["No", "Yes"])
-Mode_of_conception = st.sidebar.selectbox("Mode of conception", options=["Natural conception", "Assisted conception"])
-Pregnancy_complications = st.sidebar.selectbox("Pregnancy complications", options=["Yes", "No"])
-Breastfeeding = st.sidebar.selectbox("Breastfeeding", options=["Yes", "No"])
-Rooming_in = st.sidebar.selectbox("Rooming-in", options=["Yes", "No"])
-Planned_pregnancy = st.sidebar.selectbox("Planned pregnancy", options=["Yes", "No"])
-Intrapartum_pain = st.sidebar.number_input("Intrapartum pain (范围: 0-10)", min_value=0, max_value=10, value=5)
-Postpartum_pain = st.sidebar.number_input("Postpartum pain (范围: 0-10)", min_value=0, max_value=10, value=5)
+# 英文特征名称
+feature_names = [
+    "Resilience", "Depression", "Anxiety", "Family_support", "Age", "Occupation", "Method_of_delivery",
+    "Marital_status","Educational_degree","Average_monthly_household_income","Medical_insurance",
+    "Mode_of_conception","Pregnancy_complications","Breastfeeding","Rooming_in","Planned_pregnancy",
+    "Intrapartum_pain","Postpartum_pain"
+]
 
-# 添加预测按钮
-predict_button = st.sidebar.button("进行预测")
+# 动态生成输入项
+st.sidebar.header("变量输入区域")
+st.sidebar.write("请输入变量值：")
 
-# 主页面用于结果展示
-if predict_button:
-    st.header("预测结果")
-    try:
-        # 将输入特征转换为模型所需格式
-        input_array = np.array([
-            Resilience, Depression, Anxiety, Family_support, Age, Intrapartum_pain, Postpartum_pain,
-            # 对于分类特征，需要将其转换为数值（例如通过编码）
-            1 if Occupation == "Full-time job" else 0,
-            1 if Method_of_delivery == "Vaginal delivery" else 0,
-            1 if Marital_status == "Married" else 0,
-            1 if Educational_degree == "Associate degree or below" else 0,
-            1 if Average_monthly_household_income == "Average monthly household income less than or equal to 5000 yuan" else 0,
-            1 if Medical_insurance == "No" else 0,
-            1 if Mode_of_conception == "Natural conception" else 0,
-            1 if Pregnancy_complications == "Yes" else 0,
-            1 if Breastfeeding == "Yes" else 0,
-            1 if Rooming_in == "Yes" else 0,
-            1 if Planned_pregnancy == "Yes" else 0
-        ]).reshape(1, -1)
+feature_values = []
+for feature, properties in feature_ranges.items():
+    if properties["type"] == "numerical":
+        value = st.sidebar.number_input(
+            label=f"{feature} ({properties['min']} - {properties['max']})",
+            min_value=float(properties["min"]),
+            max_value=float(properties["max"]),
+            value=float(properties["default"]),
+        )
+    elif properties["type"] == "categorical":
+        value = st.sidebar.selectbox(
+            label=f"{feature} (Select a value)",
+            options=properties["options"],
+        )
+    feature_values.append(value)
 
-        # 模型预测
-        prediction = stacking_regressor.predict(input_array)[0]
+# 转换为模型输入格式
+features = np.array([feature_values])
 
-        # 显示预测结果
-        st.success(f"预测结果：{prediction:.2f}")
+# 预测与 SHAP 可视化
+if st.button("预测"):
 
-        # 生成 SHAP 瀑布图
-        st.header("SHAP 瀑布图分析")
-        st.write("根据用户输入的数值生成的单个样本 SHAP 瀑布图，用于解释特征对预测结果的贡献。")
-        st.write("注意：由于回归模型不能输出预测概率，因此 SHAP 分析基于模型的预测值进行解释。")
+    # SHAP 解释器 - 修正为使用 stacking_regressor
+    explainer = shap.TreeExplainer(stacking_regressor)
+    shap_values = explainer.shap_values(features)
 
-        # 计算 SHAP 值
-        explainer = shap.Explainer(stacking_regressor)
-        shap_values = explainer(input_array)
+    # 获取基础值和第一个样本的 SHAP 值
+    if isinstance(explainer.expected_value, list):
+        base_value = explainer.expected_value[0]  # 如果是列表，取第一个元素
+    else:
+        base_value = explainer.expected_value  # 如果是单个值，直接使用
 
-        # 绘制 SHAP 瀑布图
-        shap.plots.waterfall(shap_values[0], show=False)
-        st.pyplot()
+    shap_values_sample = shap_values[0]
 
-    except Exception as e:
-        st.error(f"预测时发生错误：{e}")
+    # 创建SHAP瀑布图，确保中文显示
+    plt.figure(figsize=(6, 4))  # 设置图形尺寸为6x4英寸
+    shap.waterfall_plot(
+        shap.Explanation(
+            values=shap_values_sample,
+            base_values=base_value,
+            data=features[0],
+            feature_names=feature_names
+        ),
+        max_display=10  # 限制显示的特征数量
+    )
+
+    # 保存SHAP瀑布图并展示
+    plt.savefig("shap_waterfall_plot.png", bbox_inches='tight', dpi=600)
+    st.image("shap_waterfall_plot.png")
         
         
         
