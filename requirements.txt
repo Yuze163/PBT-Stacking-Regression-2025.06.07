@@ -9,3 +9,4 @@ matplotlib==3.8.4
 shap==0.46.0
 lightgbm==4.6.0
 python==3.1.0
+IPython==8.25.0
